@@ -1,0 +1,1256 @@
+---
+title: "Spatial Prediction and Risk Factor Analysis of Bicycle Crashes in Washington, DC"
+author: "Zhonghua Yang"
+date: "2023-04-21"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+    code_folding: hide
+    theme: paper
+    highlight: textmate
+editor_options:
+  chunk_output_type: console
+  chunk_output_highlight: textmate
+  word_wrap: true
+project:
+  type: website
+  output_dir: docs
+editor: visual
+execute:
+  warning: false
+  error: false
+  messages: false
+---
+
+# 1. Introduction
+
+![](images/pexels-mikey-dabro-1002668.jpg)
+
+Bicycles as a mode of transportation offer various benefits, including reducing environmental pollution, lowering carbon emissions, being cost-effective, and alleviating urban traffic congestion. While the development of bicycle transportation is increasingly emphasized globally, with many countries and cities considering it an integral part of urban transportation planning, the United States still lags behind in this aspect.
+
+Although some cities, including Washington, D.C., have begun to promote bicycle transportation by constructing bike lanes and implementing bike-sharing systems like Capital Bikeshare, bicycle commuting still accounts for a relatively small proportion in the US. Washington, D.C., faces unique challenges in terms of its infrastructure, road network, and urban layout, which can create additional difficulties for cyclists and contribute to the high crash rate.
+
+Furthermore, bicycle transportation safety is a prominent issue in the US, particularly in Washington, D.C., where mixed traffic between bike lanes and motor vehicles can easily lead to crashes and casualties. One critical concern is the lack of a comprehensive network of protected bike lanes, which would separate cyclists from motor vehicle traffic and minimize conflicts. Additionally, inadequate signage, insufficient cyclist and driver education, and varying levels of enforcement of traffic rules contribute to the problem.
+
+To address these issues, Washington, D.C., should consider investing in improved infrastructure, such as expanding protected bike lanes, enhancing signage and visibility at intersections, and conducting public awareness campaigns to educate both cyclists and drivers on safe road-sharing practices. Collaboration between city planners, transportation departments, and local communities is crucial to creating a safer and more inclusive environment for all road users.
+
+Through an in-depth analysis of bicycle crash data in Washington, D.C., and the establishment of a random forest machine learning model, we have effectively predicted the locations of bicycle crashes. Simultaneously, by employing k-fold cross-validation and spatial cross-validation methods, we have ensured the accuracy and reliability of the model. We also rely on rich charts and maps to visualize the data, providing a multi-layered and multi-dimensional display of the results. These findings aim to offer robust data support and intuitive evidence for policy analysis to the government and relevant departments, allowing them to take targeted measures to improve bicycle transportation safety in Washington, D.C.
+
+```{r message=FALSE,warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE)
+library(dplyr)
+library(rlang)
+library(gridExtra)
+library(patchwork)
+library(tidyverse)
+library(sf)
+library(lubridate)
+library(tigris)
+library(gganimate)
+library(riem)
+library(gridExtra)
+library(knitr)
+library(kableExtra)
+library(tidycensus)
+library(GGally)
+library(shiny)
+library(reshape2)
+library(ggcorrplot)
+library(viridis)
+library(gstat)
+library(caret)
+library(automap)
+library(randomForest)
+library(Metrics)
+library(stargazer)
+library(gifski)
+library(gganimate)
+library(transformr)
+library(plotly)
+library(jsonlite)
+source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
+
+plotTheme <- theme(plot.title = element_text(hjust = 0, size=15, color = "#340d14",face="bold"),
+                   plot.subtitle = element_text(hjust = 0, size=10, color = "#340d14"),
+                   panel.background = element_rect(fill = "#f6f4f1"),
+                   axis.text = element_text(size=10, color = "#340d14"),
+                   axis.title = element_text(size=12,face="bold", color = "#340d14"),
+                   legend.title = element_text(size=10,face="bold", color = "#340d14"),
+                   legend.text = element_text(size=10, color = "#340d14"),
+                   axis.ticks.x = element_blank(),
+                   axis.line.x = element_line(color = "#340d14", size = 1),
+                   axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 10, color = "#340d14")) 
+
+mapTheme <- theme(
+   plot.title = element_text(hjust = 0, size=15, color = "#340d14", face="bold"),
+  plot.subtitle = element_text(hjust = 0, size=10, color = "#340d14"),
+  panel.background = element_rect(fill = "#f6f4f1"),
+  panel.grid.major = element_line(color = "gray90"),
+  axis.text = element_text(size=10, color = "#340d14"),
+  axis.title = element_text(size=12, face="bold", color = "#340d14"),
+  legend.title = element_text(size=10, face="bold", color = "#561C26"),
+  legend.text = element_text(size=10, color = "#561C26"),
+  axis.ticks = element_blank(),
+  axis.line = element_blank()
+)
+
+```
+
+```{r  warning = FALSE, include=FALSE, eval = TRUE}
+# Install Census API Key
+tidycensus::census_api_key("155cc525674a0d27c98afbb7030d0802e9bb5543", overwrite = TRUE)
+```
+
+## 2. Collect and Explore Data
+
+In this section, we will focus on describing the data we have collected, and we will explain how we cleaned, filtered, merged, and transformed it into the dataset we needed. During this process, we will visualize the data, which is a significant aspect of presenting persuasive information. This data will reveal potential correlations between the occurrence of bicycle crashes in Washington D.C. and various environmental factors.
+
+### 2.1 Census Info
+
+![](images/pexels-ingo-joseph-9816.jpg)
+
+Census data is also required for this regression analysis. The layout of bike-sharing sites is closely linked to the socioeconomic characteristics and the appearance of specific areas that are mapped out by census data. In this section, we first obtained Washington D.C.'s population census data from the American Community Survey (ACS). We selected some important variables related to the project, such as total population, median income, white population, commute time, and usage of different transportation modes. Next, we renamed these variables for easier understanding.
+
+We chose the following variables: 1. Total population; 2. Median income; 3. White population; 4. Commute time; 5. Usage numbers of different transportation modes; 6. Public transportation usage numbers; 7. Car transportation usage numbers; 8. Average age; 9. Female population; 10. Population of males and females in different age groups; 11. Number of vehicles; 12. Education level (number of people with bachelor's degrees); 13. Number of people who walk to work.
+
+Then, we calculated some percentage variables, such as the proportion of the white population, average commute time, the proportion of public transportation users, female population proportion, the proportion of the underage population, the proportion of the population with bachelor's degrees, and the proportion of car transportation users.
+
+Finally, we extracted geographical information and converted it into simple feature (sf) objects, which serve as the base geographical map of Washington D.C., for performing geo spatial operations in subsequent analyses. This data will help us make targeted recommendations in terms of shared bike station layouts and urban planning.
+
+```{r  message=FALSE, warning=FALSE, cache=TRUE, results = 'hide'}
+DCCensus <- 
+  get_acs(geography = "tract", 
+          variables = c("B01003_001", "B19013_001", 
+                        "B02001_002", "B08013_001",
+                        "B08012_001", "B08301_001", 
+                        "B08301_010", "B01002_001",
+                        "B01001_026","B01001_003",
+                        "B01001_004","B01001_005",
+                        "B01001_006","B01001_027",
+                        "B01001_028","B01001_029",
+                        "B01001_030","B08015_001",
+                        "B06009_002","B06009_005",
+                        "B08006_015","B08301_002"), 
+          year = 2020, 
+          state = "DC", 
+          geometry = TRUE,
+          output = "wide") %>%
+  rename(Total_Pop =  B01003_001E,
+         Med_Inc = B19013_001E,
+         Med_Age = B01002_001E,
+         White_Pop = B02001_002E,
+         Travel_Time = B08013_001E,
+         Num_Commuters = B08012_001E,
+         Means_of_Transport = B08301_001E,
+         Total_car_Trans = B08301_002E,
+         Total_Public_Trans = B08301_010E,
+         Female=B01001_026E,
+         under5_male = B01001_003E,
+         between5to9_male = B01001_004E,
+         between10to14_male = B01001_005E,
+         between15to17_male = B01001_006E,
+         under5_female = B01001_027E,
+         between5to9_female = B01001_028E,
+         between10to14_female = B01001_029E,
+         between15to17_female = B01001_030E,
+         num_vehicles=B08015_001E,
+         edu_bac = B06009_005E,
+         walk_to_work = B08006_015E) %>%
+  
+  select(Total_Pop, Med_Inc, White_Pop, Travel_Time,
+         Means_of_Transport, Total_Public_Trans,Total_car_Trans,
+         Med_Age,Female, under5_male,between5to9_male,between10to14_male,between15to17_male,under5_female,between5to9_female, between10to14_female,between15to17_female,num_vehicles,edu_bac,walk_to_work,GEOID, geometry) %>%
+  
+  mutate(Percent_White = White_Pop / Total_Pop,
+         Mean_Commute_Time = Travel_Time / Total_Public_Trans,
+         Percent_Taking_Public_Trans = Total_Public_Trans / Means_of_Transport,
+         Percent_Taking_car_Trans = Total_car_Trans / Means_of_Transport,
+         Percent_Female= Female/Total_Pop,
+         Percent_Minor = (under5_male+between5to9_male+between10to14_male+between15to17_male+under5_female+between5to9_female+between10to14_female+between15to17_female)/Total_Pop,
+         Percent_edu= edu_bac/Total_Pop)%>%
+  select(Med_Inc, Travel_Time,
+         Means_of_Transport, Total_Public_Trans,
+         Med_Age,edu_bac,walk_to_work,Percent_White,Mean_Commute_Time,Percent_Taking_Public_Trans,Percent_Female,Percent_Minor,Percent_edu,Percent_Taking_car_Trans,GEOID, geometry)
+```
+
+```{r}
+
+geojsonio::geojson_write(DCCensus, "DCCensus.geojson")
+```
+
+
+```{r message = FALSE, warning = FALSE}
+DCTracts <- 
+  DCCensus %>%
+  as.data.frame() %>%
+  distinct(GEOID, .keep_all = TRUE) %>%
+  select(GEOID, geometry) %>% 
+  st_sf
+```
+
+### 2.2 Separation of All Car Crashes and Bicycle Crashes
+
+![](images/pexels-%D0%B8%D0%B3%D0%BE%D1%80%D1%8C-%D0%BA%D1%80%D1%8B%D0%BA%D0%B0%D0%BD%D0%BE%D0%B2-14571407.jpg)
+
+I have collected all crash data for Washington D.C. from 2011 to 2022 and filtered out all bicycle-related crash records, including those involving bicycles and pedestrians, as well as bicycles and motor vehicles. These crash records account for approximately 8% of all crashes, amounting to nearly 10,000 incidents. We will analyze this data, using them as independent variables in our regression model, to quantify the bicycle crash situation within specific areas in Washington D.C. and predict the occurrence of bicycle crashes.
+
+```{r message=FALSE,warning=FALSE}
+crash <- st_read("C:/UPENN CLASS/capstone/data/Crashes_in_DC.geojson")%>%
+  st_transform('EPSG:2225')
+crash <- crash[crash$FROMDATE > "2010-12-31" & crash$FROMDATE < "2023-01-01" &!is.na(crash$FROMDATE), ]
+
+bicycle_crash <- crash[crash$TOTAL_BICYCLES > 0, ]
+bicycle_crash <- bicycle_crash[bicycle_crash$FROMDATE > "2010-12-31" & bicycle_crash$FROMDATE < "2023-01-01"& !is.na(bicycle_crash$FROMDATE), ]
+```
+
+#### 2.2.1 Number of Crashes Per Year
+
+In this section, we have visualized the first chart: a bar chart of the total number of crashes per year. Our goal is to analyze the number of crashes each year to identify any potential trends or patterns. By grouping the crash data by year and summarizing the counts, we created a dataset showing the number of crashes per year from 2011 to 2022.
+
+The following code snippet groups the crash dataset by the occurrence year (FROMDATE), calculates the number of crashes per year, and stores the results in the "crash_by_year" dataset. The column name is then updated to "year" for easier understanding.
+
+```{r  message=FALSE,warning=FALSE}
+crash_by_year <- crash %>% 
+  group_by(year(FROMDATE)) %>% 
+  summarise(count = n())
+colnames(crash_by_year)[1] <- "year"
+```
+
+Next, we visualized the crash data by creating a bar chart displaying the number of crashes per year. Visualization helps us better understand the trends in the number of crashes and whether there are any significant increases or decreases in the number of crashes in certain years. We created a gradient color scheme for the bar chart, with darker colors (closer to purple) for years with more crashes and lighter colors (closer to blue) for years with fewer crashes. We can see that there are many crashes in all the recorded years, with 2019 having the highest number at 26,790.
+
+```{r  message=FALSE,warning=FALSE}
+ggplot(crash_by_year, aes(x=year, y=count, fill=count)) +
+  geom_bar(stat="identity") +
+  scale_fill_gradient(low = "#d1e0ff", high = "#561C26", guide = guide_colorbar(title = "Count", direction = "vertical", barheight = 10, barwidth = 1)) +
+  geom_text(aes(label=count), vjust=-0.5, color="#232310", size=3) +
+  labs(title = "Number of Crashes Per Year",
+       subtitle = "Based on all recorded crashes from 2011 to 2022",
+       x = "Year",
+       y = "Number of Crashes") +
+  plotTheme+
+scale_x_continuous(breaks = seq(min(crash_by_year$year), max(crash_by_year$year), by = 1))
+```
+
+#### 2.2.2 Number of Bicycle Crashes Per Year
+
+In this section, our goal is to display the number of bicycle crashes per year to identify potential trends or patterns. Similar to the previous analysis and chart for all crashes, we grouped the bicycle crash data by year and summarized the counts, creating a dataset showing the number of bicycle crashes per year from 2011 to 2022.
+
+Next, we grouped the bicycle crash dataset by the occurrence year (FROMDATE), calculated the number of bicycle crashes per year, and stored the results in the "bicycle_crash_by_year" dataset. The column name is then updated to "year" for easier understanding.
+
+```{r  message=FALSE,warning=FALSE}
+bicycle_crash_by_year <- bicycle_crash %>% 
+  group_by(year(FROMDATE)) %>% 
+  summarise(count = n())
+colnames(bicycle_crash_by_year)[1] <- "year"
+```
+
+Next, we visualized the bicycle crash data by creating a bar chart displaying the number of bicycle crashes per year. This visualization shows the number of bicycle crashes for each year from 2011 to 2022. We used different color gradients to represent the number of bicycle crashes and added labels for the number of crashes on each bar.
+
+```{r  message=FALSE,warning=FALSE}
+ggplot(bicycle_crash_by_year, aes(x = year, y = count, fill=count)) +
+geom_bar(stat="identity") +
+  scale_fill_gradient(low = "#d1e0ff", high = "#561C26", guide = guide_colorbar(title = "Count", direction = "vertical", barheight = 10, barwidth = 1)) +
+  geom_text(aes(label=count), vjust=-0.5, color="#232310", size=3.4) +
+  labs(title = "Number of Bicycle Crashes Per Year",
+       subtitle = "Based on all recorded bicycle crashes from 2011 to 2022",
+       x = "Year",
+       y = "Number of Crashes",
+       color = "Count")+
+  plotTheme+
+scale_x_continuous(breaks = seq(min(bicycle_crash_by_year$year), max(crash_by_year$year), by = 1))
+```
+
+#### 2.2.3 Percentage of Bicycle Crashes Per Year
+
+In this section, our goal is to analyze the percentage of bicycle crashes in total crashes per year to identify the share of bicycle crashes among all crashes. We will examine the proportion of bicycle crashes in all crashes for each year. To do this, we first summarize both the total crash data and bicycle crash data by year. Next, we merge these two sets of data into a single data frame and calculate the proportion of bicycle crashes in all crashes for each year. This can provide a clear representation of the importance of bicycle crashes in traffic accidents in daily life.
+
+```{r  message=FALSE,warning=FALSE}
+
+crash_by_year_df <- st_drop_geometry(crash_by_year)
+bicycle_crash_by_year_df <- st_drop_geometry(bicycle_crash_by_year)
+
+
+combined_data <- merge(crash_by_year_df, bicycle_crash_by_year_df, by = "year")
+colnames(combined_data)[2] <- "all"
+colnames(combined_data)[3] <- "bicycle"
+
+combined_data$bike_prop <- combined_data$bicycle / combined_data$all
+combined_data$other <- combined_data$all - combined_data$bicycle
+```
+
+Next, we use the ggplot2 package to create a stacked bar chart to display the proportion of bicycle crashes in all crashes per year. In this chart, the blue portion represents bicycle crashes, and the red portion represents other types of crashes. Additionally, we added percentage labels to each bar to provide a more intuitive understanding of the proportion of bicycle crashes each year. Through this chart, we can visually comprehend the proportion of bicycle crashes in all crashes per year, laying the foundation for further analysis and modeling.
+
+```{r  message=FALSE,warning=FALSE}
+
+ggplot(combined_data, aes(x = year, y = bike_prop)) +
+  geom_col(aes(y = 1, fill = "other"), position = "stack") +
+   geom_col(aes(fill = "bicycle"), position = "stack") +
+    geom_text(label = paste0("---",round(combined_data$bike_prop*100,2), "%"),vjust = 0.5, angle=90,color="#a3c4f3", size=5,nudge_y = 0.13) +
+  scale_fill_manual(name = "Crash Type", values = c("bicycle" = "#a3c4f3", "other" = "#561C26")) +
+  labs(x = "Year", y = "Proportion of Bicycle Crashes",subtitle = "A stacked bar chart to show the size of the share",) +
+  ggtitle("Proportion of Bicycle Crashes by Year")+
+  plotTheme+
+scale_x_continuous(breaks = seq(min(bicycle_crash_by_year$year), max(crash_by_year$year), by = 1))
+```
+
+#### 2.2.4 Proportion of Bicycle Crashes Involving Injuries by Year
+
+In this section, we will analyze the proportion of bicycle crashes involving injuries in all bicycle crashes per year. To do this, we first filter out crash records from the original bicycle crash data that involve at least one injured person (including cyclists, drivers, and pedestrians). Next, we summarize the bicycle crashes involving injuries by year and calculate the proportion of bicycle crashes with injuries in all bicycle crashes for each year. Finally, we create a stacked bar chart to display the proportion of bicycle crashes with injuries in all bicycle crashes per year. In this chart, the blue portion represents bicycle crashes involving injuries, and the purple portion represents bicycle crashes without injuries. Additionally, we added percentage labels to each bar to provide a more intuitive understanding of the proportion of bicycle crashes with injuries each year.
+
+```{r message=FALSE,warning=FALSE}
+
+filtered_data <- bicycle_crash %>%
+  filter(MAJORINJURIES_BICYCLIST > 0 |
+           MINORINJURIES_BICYCLIST > 0 |
+           UNKNOWNINJURIES_BICYCLIST > 0 |
+           FATAL_BICYCLIST > 0 |
+           MAJORINJURIES_DRIVER > 0 |
+           MINORINJURIES_DRIVER > 0 |
+           UNKNOWNINJURIES_DRIVER > 0 |
+           FATAL_DRIVER > 0 |
+           MAJORINJURIES_PEDESTRIAN > 0 |
+           MINORINJURIES_PEDESTRIAN > 0 |
+           UNKNOWNINJURIES_PEDESTRIAN > 0 |
+           FATAL_PEDESTRIAN > 0)
+
+
+bicycle_crash_injured <- filtered_data %>%
+  group_by(year = as.numeric(format(as.Date(FROMDATE), "%Y"))) %>%
+  summarise(total_crashes = n(),
+            bike_crashes = sum(MAJORINJURIES_BICYCLIST > 0 |
+                                MINORINJURIES_BICYCLIST > 0 |
+                                UNKNOWNINJURIES_BICYCLIST > 0 |
+                                FATAL_BICYCLIST > 0)) %>%
+  mutate(bike_prop = bike_crashes / total_crashes,
+         other_prop = 1 - bike_prop)
+
+ggplot(bicycle_crash_injured, aes(x = year)) +
+  
+  geom_col(aes(y = 1, fill = "other"), position = "stack") +
+  geom_col(aes(y = bike_prop, fill = "bicycle"), position = "stack") +
+  geom_text(aes(y = bike_prop, label = paste0(round(bike_prop * 100, 2), "% ---")), vjust = 0.5, angle = 90, color = "#561C26", size = 5, nudge_y = -0.14) +
+  scale_fill_manual(name = "Crash Type", values = c("bicycle" = "#a3c4f3", "other" = "#561C26")) +
+  labs(x = "Year", y = "Proportion", subtitle = "A stacked bar chart to show the size of the share") +
+  ggtitle("Proportion of Bicycle Crashes Involving Injuries by Year") +
+  scale_x_continuous(breaks = seq(min(bicycle_crash_by_year$year), max(bicycle_crash_by_year$year), by = 1)) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1))+
+  plotTheme
+
+```
+
+#### 2.2.5 Map of Bicycle Crash Locations
+
+```{r  message=FALSE,warning=FALSE}
+dc_tracts_crs <- st_crs(DCTracts)
+
+bicycle_crash_transformed <- st_transform(bicycle_crash, dc_tracts_crs)
+
+map_plot <- ggplot() +
+  geom_sf(data = DCTracts, fill = "#FAF0F1", color = "#A0898F", size = 0.1, alpha = 1) +
+  geom_point(data = bicycle_crash, aes(x = LONGITUDE, y = LATITUDE), color = "#003049", alpha = 0.1, show.legend = FALSE) +
+  theme_minimal() +
+  labs(title = "Bicycle Crash Locations") +
+  mapTheme
+
+map_plot <- map_plot + 
+  coord_sf(xlim = c(min(bicycle_crash_transformed$LONGITUDE), max(bicycle_crash_transformed$LONGITUDE)), ylim = c(min(bicycle_crash_transformed$LATITUDE), max(bicycle_crash_transformed$LATITUDE))) + xlab("longitude") + ylab("latitude") +
+mapTheme
+
+print(map_plot)
+```
+
+Based on the above two bar charts and data displaying crash proportions, we can observe the following key points:
+
+1.  Although bicycle crashes make up a relatively small proportion of all crashes, they do pose significant safety risks. This suggests that bicycle safety should be given adequate attention in research and policy development.
+
+2.  From the second bar chart, we can see that the proportion of bicycle crashes involving injuries is very high, nearly 98%. This indicates that the consequences of bicycle crashes are often severe, potentially leading to injuries or even fatalities. Therefore, improving bicycle road safety is crucial for protecting the lives of cyclists and other road users.
+
+These observations are closely related to our research. Our goal is to establish a predictive model to understand the likelihood and associated environmental factors of bicycle crashes occurring in Washington D.C. By analyzing this data, we can better comprehend the severity and urgency of bicycle crashes, providing strong support for policymakers. Furthermore, by identifying the key factors affecting the occurrence of bicycle crashes, our model can help develop targeted policies and measures to reduce the incidence of bicycle crashes, improve road safety, and minimize the harm caused by bicycle crashes to cyclists and other road users.
+
+### 2.3 Traffic Road Data
+
+![](images/pexels-%E4%BD%95-%E9%A2%96-13359813.jpg)
+
+In this section, we imported road data for Washington D.C. and created an interactive map displaying the distribution of different road types. With this interactive map, we can intuitively understand the distribution of various road types throughout Washington D.C. This helps us better understand the impact of the road environment on bicycle crashes, providing more comprehensive information for our predictive model.。
+
+```{r message=FALSE,warning=FALSE}
+road <- st_read("C:/UPENN CLASS/capstone/data/Roads_2015.geojson")%>%
+  st_transform('EPSG:2225')
+```
+
+```{r  message=FALSE,warning=FALSE}
+animation <- ggplot() +
+  geom_sf(data = DCTracts %>% st_transform(crs=4326), fill = "#FAF0F1", color = "#A0898F", size = 0.1) +
+  geom_sf(data = road, aes(color = DESCRIPTION, linetype = "solid"), size = 0.5) +
+  scale_color_manual(values = c("Paved Drive" = "#001219", 
+                                "Alley" = "#005F73", 
+                                "Parking Lot"  = "#0A9396",
+                                "Intersection" = "#94D2BD",
+                                "Paved Median Island"="#E9D8A6",
+                                "Paved Traffic Island"="#EE9B00",
+                                "Unpaved Traffic Island"="#CA6702",
+                                "Hidden Median"="#BB3E03",
+                                "Hidden Road"="#AE2012",
+                                "Road"="#9B2226",
+                                "Unpaved Median Island"="#9c9515")) +
+  guides(color = guide_legend(override.aes = list(linetype = "solid", size = 1.5, shape = NA))) +
+  coord_sf(datum = NA) +
+    labs(title = "Road Types in Washington, D.C.",
+       subtitle = "Road Type: {closest_state}") +
+  transition_states(
+    DESCRIPTION,
+    transition_length = 3,
+    state_length = 2
+  ) +
+  enter_fade() +
+  exit_fade()+
+mapTheme
+
+animate(animation, nframes = 200, end_pause = 50, width = 800, height = 600, renderer = gifski_renderer(loop = TRUE))
+
+```
+
+### 2.4 Bicycle Lanes Data
+
+![](images/pexels-neosiam-596924.jpg)
+
+First, we read the bike lane data and transform its coordinate system to match the coordinate system of the other datasets. Next, we create a basemap that displays the geographic area of Washington D.C., and we draw the bike lanes on the basemap. Bike lanes are represented by blue lines.
+
+```{r  message=FALSE,warning=FALSE}
+bicycle_lanes <- st_read("C:/UPENN CLASS/capstone/data/bicycle_lanes.geojson")%>%
+  st_transform('EPSG:2225')
+```
+
+```{r  message=FALSE,warning=FALSE}
+ ggplot() +
+  geom_sf(data = DCTracts %>% st_transform(crs=4326), fill = "#FAF0F1", color = "#A0898F", size = 0.1, alpha = 1) +
+  coord_sf(datum = NA) +
+
+  geom_sf(data = bicycle_lanes, color = "#0A9396", size = 1) +
+  labs(title = "Bicycle Lanes in Washington, D.C.",
+       subtitle = "Blue lines represent bicycle lanes")+  
+mapTheme
+
+```
+
+To better showcase the distribution of bike lanes, we will create a zoomed-in sub-map to examine bike lanes in specific areas in greater detail. Finally, we will put together the original map and the zoomed-in sub-map, allowing us to view the distribution of bike lanes throughout Washington D.C. as well as detailed information for specific areas in one view.
+
+```{r  message=FALSE,warning=FALSE}
+base_map <- ggplot() +
+  geom_sf(data = DCTracts %>% st_transform(crs=4326), fill = "#FAF0F1", color = "#A0898F", size = 0.1, alpha = 1) +
+  coord_sf(datum = NA) +
+ mapTheme
+
+bicycle_lanes_plot <- base_map +
+  geom_sf(data = bicycle_lanes, color = "#0A9396", size = 1) +
+  labs(title = "Bicycle Lanes in D.C.",
+       subtitle = "Blue lines represent bicycle lanes")+
+mapTheme
+
+zoomed_area <- st_bbox(c(xmin = -77.05, xmax = -77.00, ymin = 38.89, ymax = 38.92), crs = 4326)
+
+bicycle_lanes_transformed <- bicycle_lanes %>% st_transform(crs = st_crs(zoomed_area))
+
+zoomed_map <- base_map +
+  geom_sf(data = bicycle_lanes_transformed %>% st_crop(zoomed_area), color = "#0A9396", size = 2, alpha = 1) +
+  coord_sf(xlim = c(zoomed_area["xmin"], zoomed_area["xmax"]), ylim = c(zoomed_area["ymin"], zoomed_area["ymax"])) +
+  labs(title = "Zoomed Area",
+       subtitle = "Detailed view of a specific area")+
+mapTheme
+
+combined_map <- bicycle_lanes_plot + zoomed_map + plot_layout(ncol = 2)
+combined_map
+```
+
+### 2.5 Traffical Sign Data
+
+![](images/pexels-tima-miroshnichenko-5061170-01.jpg)
+
+We read data from the traffic sign data file and converted its coordinate system to be consistent with the other datasets. Traffic signs play a crucial guiding role in the transportation system, as they remind drivers, cyclists, and pedestrians to follow traffic rules and ensure road safety. In our predictive model, traffic sign data can help us understand the traffic rule settings in a specific area, allowing us to analyze their relationship with the crash occurrence rate. In terms of transportation policies, by analyzing the connection between traffic signs and crashes, the government can adjust traffic signs when necessary to enhance road safety.
+
+```{r  message=FALSE,warning=FALSE}
+traffic_signs <- st_read("C:/UPENN CLASS/capstone/data/Other_Traffic_Signs_1999.geojson")%>%
+  st_transform('EPSG:2225')
+```
+
+### 2.6 Traffical Signal Data
+
+![](images/pexels-isaque-pereira-394377.jpg)
+
+We read data from the traffic signal data file and converted its coordinate system to be consistent with the other datasets. Traffic signals are essential tools for traffic management, as they help reduce traffic congestion and accident risks by controlling traffic flow. In our predictive model, traffic signal data can help us understand the traffic conditions and distribution of traffic flow. In terms of transportation policy-making, based on the analysis results, the government can adjust traffic signal settings and timing to improve road safety and transportation efficiency.。
+
+```{r  message=FALSE,warning=FALSE}
+traffic_signal <- st_read("C:/UPENN CLASS/capstone/data/Traffic_Signal.geojson")%>%
+  st_transform('EPSG:2225')
+```
+
+### 2.7 Block Information Data
+
+![](images/pexels-jan-van-der-wolf-14615326.jpg)
+
+We read data from the block information data file and converted its coordinate system to be consistent with the other datasets. Block information can help us understand road structures, road types, and surrounding environments, which may affect the likelihood of crash occurrences. In our predictive model, block information data can serve as feature variables, assisting us in predicting crashes. In terms of transportation policy, the government can use block information to reconstruct roads and improve road safety.
+
+```{r  message=FALSE,warning=FALSE}
+block_info <- st_read("C:/UPENN CLASS/capstone/data/Roadway_Block.geojson")%>%
+  st_transform('EPSG:2225')
+```
+
+### 2.8 Turning Movement Information Data
+
+![](images/pexels-meruyert-gonullu-6152380.jpg)
+
+We read data from the Turning Movement data file and converted its coordinate system to be consistent with the other datasets. Turning movement information data can reflect traffic flow, congestion, and driver behavior. In our predictive model, this information helps us understand the likelihood of crash occurrences. In terms of transportation policy, the government can use turning movement information to adjust road designs, such as setting up dedicated turning lanes or optimizing traffic signal timing, to improve road safety.
+
+```{r  message=FALSE,warning=FALSE}
+Turning_Movement <- st_read("C:/UPENN CLASS/capstone/data/Turning_Movement_Count_AM_Peak.geojson")%>%
+  st_transform('EPSG:2225')
+```
+
+### 2.9. Import DC Boundary Data
+
+![](images/pexels-samad-ismayilov-757317.jpg)
+
+We read data from the Washington D.C. boundary data file and converted its coordinate system to be consistent with the other datasets. This is necessary for creating fishnet grid data.
+
+```{r message = FALSE, warning = FALSE}
+DCBoundary<-st_read("C:/UPENN CLASS/capstone/data/Washington_DC_Boundary.geojson")%>%
+  st_transform('EPSG:2225')
+```
+
+## 3. Create Grids and Integrate Data
+
+In this study, creating grids and integrating data into them is of great significance. First, it allows us to combine various spatial datasets such as traffic signs, traffic signals, street information, turning movement information, and census data into a unified spatial reference for subsequent spatial analysis and modeling. This helps to investigate the relationships between different factors and bicycle crashes, providing a basis for the government to formulate more effective traffic policies.
+
+When building the random forest model, integrating data into grids helps us better process and analyze these spatial data. The random forest model requires inputting multiple feature variables to predict the target variable (such as bicycle crash occurrence rate). By integrating various spatial datasets into the grids, we can use these grids as observation samples, with the various variables within the grid as feature variables input into the model. In this way, the model can learn the relationships between different spatial features and bicycle crashes, thereby predicting the probability of bicycle crashes occurring in specific areas.
+
+In summary, creating grids and integrating data into them helps to combine various spatial datasets into a complete dataset, facilitating spatial analysis and modeling. Through the random forest model, we can discover the relationships between different spatial features and bicycle crashes, providing the government with recommendations regarding road design, traffic management, and improvements to bicycle facilities, in order to reduce the risk of bicycle crashes.
+
+### 3.1 Create Fishnet
+
+In this section, we created a fishnet grid covering the Washington D.C. area, with each grid cell having a side length of 500 meters, forming a rectangular grid. Fishnet is a common method of organizing spatial data, dividing geographic space into regular grids, which is convenient for spatial analysis and modeling.
+
+Finally, we plotted the generated grid. By setting fill, color, and stroke parameters, we can adjust the grid's fill color, border color, and border thickness. The resulting map displays a rectangular grid covering the Washington D.C. area, with each grid cell representing an area of 0.1 square miles.
+
+```{r extract_geometries ,message = FALSE, warning = FALSE}
+fishnet <- 
+  st_make_grid(DCBoundary,
+               cellsize = 500, 
+               square = FALSE) %>%
+  .[DCBoundary] %>%            # <- MDH Added
+st_sf() %>%
+  mutate(uniqueID = rownames(.)) %>%
+  st_transform(crs = 4326) 
+
+ggplot() +
+  geom_sf(data = fishnet, fill = "#370617", color = "#f6f4f1", stroke = 0.1) +
+  labs(title = "Fishnet, 0.1 square miles area per cell",
+       subtitle = "Washington DC") +
+  mapTheme
+
+```
+
+### 3.2 Connect Bicycle Crash Data to Fishnet
+
+We associated the bicycle crash data with the previously created fishnet grid to count the number of bicycle crashes in each grid cell. This is crucial for our project, as it allows us to gain a more intuitive understanding of the occurrence of bicycle crashes in different areas of Washington D.C. and provides valuable input data for the subsequent random forest model. First, we transformed the bicycle crash data (bicycle_crash) to the same coordinate reference system as the grid (WGS84, i.e., EPSG:4326). Next, we determined in which grid cell each bicycle crash occurred. The parameter sparse = FALSE ensures that the result is a logical matrix, with rows representing bicycle crashes and columns representing grid cells. If a crash occurs within a grid cell, the corresponding matrix element is TRUE, otherwise FALSE. We then counted the number of TRUE values in each column (i.e., each grid cell), which represents the number of bicycle crashes within each grid cell, and added these counts to the fishnet dataset.
+
+Afterward, we created a visualization map showing the number of bicycle crashes within each grid cell. We set a fill color for each grid cell to represent the number of crashes, a border color of gray, and a size of 0.01. Different shades of color are used to differentiate between varying levels of crash counts. Through this visualization map, we can gain a better understanding of the distribution of bicycle crashes across different areas of Washington D.C.
+
+```{r message=FALSE,warning=FALSE}
+bicycle_crash<-bicycle_crash%>%
+  st_transform(crs = 4326)
+
+intersects <- st_intersects(bicycle_crash, fishnet, sparse = FALSE)
+fishnet<- fishnet %>% mutate(crash_count = colSums(intersects))
+ggplot() +
+  geom_sf(data = fishnet, aes(fill = crash_count), color = "#495057", size = 0.01) +
+  scale_fill_viridis(option="A") +
+  labs(title = "Bicycle Crash Count by Grid", subtitle = "Washington, D.C.") +
+  theme_minimal() +
+  mapTheme
+```
+
+### 3.3 Connect Census Data to Fishnet
+
+In this code snippet, we connect the census data to the Fishnet we created earlier to integrate relevant features (such as income, race, commute mode, etc.) from the census data into each grid. This is crucial for our project on bicycle accidents in Washington D.C. as the integrated dataset will provide valuable input features for our random forest model, helping us predict bicycle crashes more accurately.
+
+First, we use the group_by function to group the data by uniqueID of the grid. Then, we use the summarize function to calculate the average values of each predictor variable in each grid. This gives us a more summarized dataset that reflects the characteristics of each grid, such as median income, percentage of white population, commuting time, etc. When calculating the average, we ensure that missing values are ignored, which is important for data cleaning and accuracy since missing values can affect the accuracy of the model. In addition to calculating the average, we also use the st_union function to merge overlapping geometries. This ensures that we do not encounter any geometry-related issues when connecting census data to the grid.
+
+Finally, we get an integrated grid dataset that contains the average values of selected predictor variables from the census data for each grid. This integrated dataset will provide rich input features for our random forest model, allowing us to more accurately predict the risk of bicycle accidents in different areas of Washington D.C.
+
+```{r message=FALSE,warning=FALSE}
+
+selected_vars <- DCCensus %>% select(Med_Inc, Travel_Time, Means_of_Transport, Total_Public_Trans, Med_Age, edu_bac, walk_to_work, Percent_White, Mean_Commute_Time, Percent_Taking_Public_Trans, Percent_Female, Percent_Minor, Percent_edu, Percent_Taking_car_Trans, geometry)%>%
+  st_transform(crs = 4326)
+
+
+fishnet_census<- st_join(fishnet, selected_vars, join = st_intersects)
+
+fishnet_census <- fishnet_census %>%
+  group_by(uniqueID) %>%
+  summarize(
+    Med_Inc = mean(Med_Inc, na.rm = TRUE),
+    
+    Travel_Time = mean(Travel_Time, na.rm = TRUE),
+    Means_of_Transport = mean(Means_of_Transport, na.rm = TRUE),
+    Total_Public_Trans = mean(Total_Public_Trans, na.rm = TRUE),
+    Med_Age = mean(Med_Age, na.rm = TRUE),
+    edu_bac = mean(edu_bac, na.rm = TRUE),
+    walk_to_work = mean(walk_to_work, na.rm = TRUE),
+    Percent_White = mean(Percent_White, na.rm = TRUE),
+    Mean_Commute_Time = mean(Mean_Commute_Time, na.rm = TRUE),
+    Percent_Taking_Public_Trans = mean(Percent_Taking_Public_Trans, na.rm = TRUE),
+    Percent_Female = mean(Percent_Female, na.rm = TRUE),
+    Percent_Minor = mean(Percent_Minor, na.rm = TRUE),
+    Percent_edu = mean(Percent_edu, na.rm = TRUE),
+    Percent_Taking_car_Trans = mean(Percent_Taking_car_Trans, na.rm = TRUE),
+    geometry = st_union(geometry) 
+  ) %>% ungroup()
+
+fishnet_census <-st_drop_geometry(fishnet_census)
+fishnet <- left_join(fishnet, fishnet_census, by = "uniqueID")
+
+```
+
+### 3.4 Connect Bicycle Lanes Data to Fishnet
+
+We integrated the bike lane data into the Fishnet. First, we converted the coordinate reference system of the bike lane data to be consistent with the grid, to ensure that the data can be correctly matched in the spatial join.。
+
+```{r message=FALSE,warning=FALSE}
+bicycle_lanes<-bicycle_lanes%>%
+  st_transform(crs = 4326)
+
+intersects_bike_lanes <- st_intersects(fishnet, bicycle_lanes, sparse = FALSE)
+
+
+has_bike_lanes <- apply(intersects_bike_lanes, 1, function(x) as.integer(any(x)))
+
+
+fishnet <- fishnet %>% mutate(has_bike_lanes = has_bike_lanes)
+```
+
+In the following code, we create a visualization map that shows the distribution of bike lanes in Washington, D.C. We use two colors to represent whether there is a bike lane in each grid, which helps us understand the distribution of bike lanes in the area more intuitively.
+
+```{r message=FALSE,warning=FALSE}
+ggplot() +
+  geom_sf(data = fishnet, aes(fill = factor(has_bike_lanes)), color = "#CCCAC7", size = 0.01) +
+  scale_fill_manual(values = c("#EAE3E4", "#561C26"), 
+                    labels = c("No bike lanes", "With bike lanes"), 
+                    name = "Bike Lanes") +
+  labs(title = "Bike Lanes Distribution in Washington DC", 
+       subtitle = "1: Grid with bike lanes, 0: Grid without bike lanes") +
+  theme_minimal() +
+  mapTheme
+```
+
+### 3.5 Connect Traffical Sign Data to Fishnet
+
+We integrate the traffic sign data into the Fishnet for Washington D.C. and visualize the distribution of traffic signs throughout the city. By incorporating traffic signs as a feature in the analysis, we can better predict the likelihood of bicycle accidents in the random forest model.。
+
+```{r message=FALSE,warning=FALSE}
+traffic_signs <- st_transform(traffic_signs, st_crs(fishnet))
+
+intersects_points <- st_join(traffic_signs, fishnet, join = st_intersects)
+
+sign_counts <- intersects_points %>%
+  group_by(uniqueID) %>%
+  summarize(sign_count = n()) %>%
+  ungroup()
+
+sign_counts <-st_drop_geometry(sign_counts)
+fishnet <- left_join(fishnet, sign_counts, by = "uniqueID")
+
+fishnet$sign_count[is.na(fishnet$sign_count)] <- 0
+```
+
+We perform a spatial join to associate traffic signs with the Fishnet. Then, we count the number of traffic signs in each grid and store the results in a data frame named sign_counts. Next, we merge sign_counts with the original fishnet data frame and fill missing values with 0. Finally, we create a visualization map that shows the distribution of traffic signs in Washington D.C. In this plot, we use different colors to represent the number of traffic signs in each grid, which helps us to better understand the distribution of traffic signs in the district.
+
+```{r message=FALSE,warning=FALSE}
+fishnet_sign<-fishnet
+fishnet_sign$sign_count[fishnet_sign$sign_count == 0] <- NA
+
+ggplot() +
+  geom_sf(data = fishnet_sign, aes(fill = sign_count), color = "#CCCAC7", size = 0.01) +
+  scale_fill_viridis_c(option = "A", na.value = "#f6f4f1") +
+  labs(title = "Traffical Sign Distribution",
+       subtitle = "Washington D.C.",
+       x = "Longitude",
+       y = "Latitude",
+       fill = "Sign Count") + 
+  mapTheme
+
+```
+
+### 3.6 Connect Traffical Signal Data to Fishnet
+
+In this section, we aim to integrate the traffic signal data into the Fishnet of Washington DC and display the distribution of traffic signals in the area using a visual map. Including traffic signal data as an important feature in the random forest model can help us more accurately predict the likelihood of bicycle accidents. By understanding the distribution of traffic signals in the area, we can explore the potential impact of traffic signals on the risk of bicycle accidents.
+
+```{r message=FALSE,warning=FALSE}
+traffic_signal <- st_transform(traffic_signal, st_crs(fishnet))
+
+intersects_points <- st_join(traffic_signal, fishnet, join = st_intersects)
+
+signal_counts <- intersects_points %>%
+  group_by(uniqueID) %>%
+  summarize(signal_count = n()) %>%
+  ungroup()
+
+signal_counts <-st_drop_geometry(signal_counts)
+fishnet <- left_join(fishnet, signal_counts, by = "uniqueID")
+
+fishnet$signal_count[is.na(fishnet$signal_count)] <- 0
+```
+
+```{r message=FALSE,warning=FALSE}
+fishnet_signal<-fishnet
+fishnet_signal$signal_count[fishnet_signal$signal_count == 0] <- NA
+
+ggplot() +
+  geom_sf(data = fishnet_signal, aes(fill = signal_count), color = "#CCCAC7", size = 0.01) +
+  scale_fill_viridis_c(option = "D", na.value = "#f6f4f1") +
+  labs(title = "Traffical Signal Distribution",
+       subtitle = "Washington D.C.",
+       x = "Longitude",
+       y = "Latitude",
+       fill = "Signal Count") + 
+  mapTheme
+
+```
+
+### 3.7 Connect Block Information Data and Turning Movement Information to Fishnet
+
+This section focuses on integrating block-level information and turning movement data into the grid system of Washington DC to consider these important features in predicting bicycle crashes. Block-level information includes the number of travel lanes, parking lanes, and buffer lanes in each block, which is critical for analyzing bicycle crash risk. Turning movement data provides details on traffic flow and speed, which helps us gain a deeper understanding of the potential causes of bicycle crashes.
+
+```{r message=FALSE,warning=FALSE}
+block_info<- st_transform(block_info, st_crs(fishnet))
+fishnet_block <- st_join(fishnet, block_info) %>%
+  group_by(uniqueID) %>%
+  summarize(
+    total_travel_lanes = sum(TOTALTRAVELLANES, na.rm = TRUE),
+    total_park_lanes = sum(TOTALPARKINGLANES, na.rm = TRUE),
+    total_buffers = sum(TOTALRAISEDBUFFERS, na.rm = TRUE),
+    total_revers = sum(TOTALTRAVELLANESREVERSIBLE, na.rm = TRUE),
+    travel_lane_width= mean(TOTALTRAVELLANEWIDTH, na.rm = TRUE),
+    cross_width= mean(TOTALCROSSSECTIONWIDTH, na.rm = TRUE),
+    park_lane_width = mean(TOTALPARKINGLANEWIDTH, na.rm = TRUE),
+     street_type = {
+      mode <- names(sort(table(ifelse(is.na(STREETTYPE), "Unknown", STREETTYPE)), decreasing = TRUE))[1]
+      ifelse(mode == "", "Unknown", mode)
+    },
+    geometry = st_union(geometry) # 结合重叠的几何形状
+  ) %>% ungroup()
+
+fishnet_block <-st_drop_geometry(fishnet_block)
+fishnet <- left_join(fishnet, fishnet_block, by = "uniqueID")
+```
+
+```{r message=FALSE,warning=FALSE}
+Turning_Movement<- st_transform(Turning_Movement, st_crs(fishnet))
+fishnet_turn <- st_join(fishnet, Turning_Movement) %>%
+  group_by(uniqueID) %>%
+  summarize(
+    speed = mean(TMC_CODE_SPEED, na.rm = TRUE),
+    turning_mins = mean(TMC_CODE_TRAVEL_TIME_MINUTES, na.rm = TRUE),
+    geometry = st_union(geometry) # 结合重叠的几何形状
+  ) %>% ungroup()
+
+fishnet_turn <-st_drop_geometry(fishnet_turn)
+fishnet <- left_join(fishnet, fishnet_turn, by = "uniqueID")
+```
+
+```{r include=FALSE, message=FALSE,warning=FALSE}
+
+fishnet_sp <- as(fishnet, "Spatial")
+
+
+missing_idx <- is.na(fishnet$speed)
+
+
+idw_model <- gstat(formula = speed ~ 1, data = fishnet_sp[!missing_idx,], nmax = 7, set = list(idp = 2.0))
+
+
+speed_idw <- predict(idw_model, fishnet_sp[missing_idx,])
+
+
+fishnet$speed[missing_idx] <- speed_idw$var1.pred
+```
+
+```{r include=FALSE, message=FALSE,warning=FALSE}
+
+
+missing_idx <- is.na(fishnet$turning_mins)
+
+
+idw_model <- gstat(formula = turning_mins ~ 1, data = fishnet_sp[!missing_idx,], nmax = 7, set = list(idp = 2.0))
+
+
+turning_idw <- predict(idw_model, fishnet_sp[missing_idx,])
+
+
+fishnet$turning_mins[missing_idx] <- turning_idw$var1.pred
+
+```
+
+### 3.8 Filter Out Null Data
+
+In this section, we cleaned the grid data by filtering out grids that contain missing values. This step helps to ensure the accuracy and completeness of the data during the analysis and modeling process. After filtering out the missing values, we created a new map that shows the distribution of grids in Washington DC, providing a structured foundation for our crash prediction analysis.
+
+By performing this step, we ensured that the data set used for subsequent analysis and modeling is more precise and effective. This helps us better understand the factors that affect bicycle accidents.
+
+```{r message=FALSE,warning=FALSE}
+
+fishnet_full <- na.omit(fishnet)
+
+ggplot() +
+  geom_sf(data = fishnet_full , fill = "#370617", color = "#f6f4f1", stroke = 0.1) +
+  labs(title = "Fishnet, 0.1 square miles area per cell",
+       subtitle = "Washington DC") +
+  mapTheme
+
+```
+
+### 3.9 Correlation Matrix
+
+In this part, we analyze the correlation between different variables. First, we select a group of numerical predictor variables and a response variable, and then calculate their correlation matrix. This step helps us understand the relationship between different variables, thus evaluating their roles in the accident prediction model.
+
+Next, we visualize the correlation matrix to show the correlation degree between each variable. In this heatmap, blue indicates negative correlation, red indicates positive correlation, and white indicates no correlation. By observing the heatmap, we can quickly identify which variables have strong correlations, which will be focused on in further analysis and modeling.
+
+By analyzing the correlation matrix, we can better understand the interrelationships between different variables, thus adopting more effective feature selection and feature engineering strategies in the accident prediction model. This will help us establish an accurate and stable predictive model.
+
+```{r  message=FALSE,warning=FALSE}
+
+predictor_vars <- c("Med_Inc","Travel_Time","Means_of_Transport","Total_Public_Trans","Med_Age","edu_bac","walk_to_work","Percent_White","Mean_Commute_Time","Percent_Taking_Public_Trans","Percent_Female","Percent_Minor","Percent_edu","Percent_Taking_car_Trans","has_bike_lanes","signal_count","total_travel_lanes","total_park_lanes","speed","travel_lane_width","cross_width","park_lane_width")
+
+numeric_data_subset <- fishnet_full[, c(predictor_vars)]
+numeric_data_subset<- st_drop_geometry(numeric_data_subset)
+
+cor_matrix <- cor(numeric_data_subset, use = "pairwise.complete.obs")
+
+cor_matrix_melted <- melt(cor_matrix)
+options(repr.plot.width = 18, repr.plot.height = 18)
+ggplot(data = cor_matrix_melted, aes(x = Var1, y = Var2, fill = value, label = round(value, 1))) +
+  geom_tile() + 
+  geom_text(size = 0.9, color = "black") + 
+  scale_fill_gradient2(low = "#457b9d", high = "#561C26", mid = "white", midpoint = 0, limit = c(-1, 1), name = "Correlation") + 
+  theme_minimal() + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 1, size = 6, color = "#340d14"),
+    axis.text.y = element_text(size = 6, color = "#340d14"),
+    plot.title = element_text(hjust = 0, size=15, color = "#340d14",face="bold"),
+    legend.title = element_text(size=10,face="bold", color = "#340d14"),
+    legend.text = element_text(size=8,color = "#340d14")
+  ) +
+  coord_fixed() +  
+  labs(title = "Correlation across numeric variables") 
+```
+
+## 4. Modeling for Prediction
+
+In this section, we will use a random forest model to predict bicycle crashes in Washington D.C. The main purpose of building this model is to predict the risk of bicycle crashes in different areas of the city based on the collected data. By doing so, we can identify which areas are more prone to bicycle accidents and take targeted preventive measures to improve road safety.
+
+The role of the random forest model is crucial throughout the entire project. By analyzing and modeling various factors, we can identify the factors that significantly affect the risk of bicycle crashes. This will help the government and relevant agencies make more informed decisions on road planning and improvement, traffic safety campaigns, and more. In addition, the model results can guide cyclists to be more cautious in certain areas and reduce the likelihood of bicycle crashes.
+
+Random forest models have unique advantages in this project, as they can handle complex non-linear relationships and high-dimensional data. The random forest model achieves higher prediction accuracy by building multiple decision trees and combining their prediction results, while reducing the risk of overfitting. In this project, we will use the random forest model to predict bicycle crashes in Washington D.C., thus making reasonable predictions for bicycle crashes.
+
+```{r include=FALSE, message=FALSE,warning=FALSE}
+fishnet_full<-fishnet_full%>%
+  dplyr::select(crash_count, Med_Inc, Travel_Time, Means_of_Transport, Total_Public_Trans, Med_Age, edu_bac, walk_to_work, Percent_White, Mean_Commute_Time, Percent_Taking_Public_Trans, Percent_Female, Percent_Minor, Percent_edu, Percent_Taking_car_Trans, has_bike_lanes, signal_count, total_travel_lanes, total_park_lanes, speed, travel_lane_width, cross_width, park_lane_width)
+
+```
+
+### 4.1 Training Machine Learning Models
+
+In this step, we will use the random forest model to predict the risk of bicycle accidents in Washington D.C. First, we need to split the dataset into training and testing sets, so that a portion of the data is held back for evaluating the performance of the model during training. To accomplish this, we will use 75% of the data as the training set and the remaining 25% as the testing set.
+
+```{r message=FALSE,warning=FALSE}
+fishnet_full_df <-fishnet_full%>%
+  st_drop_geometry()
+set.seed(123)
+
+train_index <- createDataPartition(y = fishnet_full_df$crash_count, 
+                                  p = .75,
+                                  list = FALSE,
+                                  times = 1)
+train_data <- fishnet_full_df[train_index, ]
+test_data <- fishnet_full_df[-train_index, ]
+
+```
+
+In the next step, we use the randomForest function to build the random forest model with the number of bicycle accidents in each grid as the response variable and all relevant variables as predictors. By specifying importance = TRUE, we can also calculate the importance of each predictor variable to understand which variables have a greater impact on predicting bicycle accident risk.
+
+After training the model, we can use the test set to evaluate the predictive performance of the model. This will help us understand the model's generalization ability on unseen data, ensuring that our model has good predictive accuracy in practical applications.
+
+```{r message=FALSE,warning=FALSE}
+
+#model
+reg <- randomForest(crash_count ~ .,
+            data = as.data.frame(train_data) %>% 
+              dplyr::select(crash_count, Med_Inc, Travel_Time, Means_of_Transport, Total_Public_Trans, Med_Age, edu_bac, walk_to_work, Percent_White, Mean_Commute_Time, Percent_Taking_Public_Trans, Percent_Female, Percent_Minor, Percent_edu, Percent_Taking_car_Trans, has_bike_lanes, signal_count, total_travel_lanes, total_park_lanes, travel_lane_width, speed,cross_width, park_lane_width), importance = TRUE)
+
+```
+
+### 4.2 Results of the Randomforest Model
+
+In this step, we will show the results of the random forest model, particularly the importance of each predictor variable. Firstly, we extract the variable importance from the model and create a table to present these values.
+
+```{r message=FALSE,warning=FALSE}
+
+var_importance <- data.frame(Variable = names(reg$importance[,1]), Importance = reg$importance[,1])
+
+# Create a table with variable importance
+kable(var_importance, 
+      col.names = c("Variable", "Importance"), # Column names
+      caption = "Variable Importance for the Random Forest Model", 
+      escape = FALSE, 
+      align = "c") %>% # Set column alignment to center
+  kable_styling("striped", full_width = F) %>%
+  row_spec(0:nrow(var_importance), color = "#340d14", background = "#f6f4f1")
+
+
+```
+
+In this step, we will show the results of the random forest model, especially the importance of each predictor variable. First, we extract the variable importance from the model and create a table to present these importance values.
+
+Next, we create a bar chart to visually display the contribution of each predictor variable to the prediction of bicycle accidents. In the chart, variable importance is represented by the height of the bars, and color gradient indicates the magnitude of importance, with darker colors indicating higher importance.
+
+By analyzing the variable importance, we can better understand which factors play a crucial role in predicting bicycle accidents in Washington DC.
+
+```{r message=FALSE,warning=FALSE}
+ggplot(var_importance, aes(x = reorder(Variable, Importance), y = Importance, fill = Importance)) + 
+  geom_bar(stat = "identity") +
+  xlab("Variable") +
+  ylab("Importance") +
+  ggtitle("Random Forest Model for Bicycle Crashes in Washington") +
+  labs(subtitle = "Feature Importance") +
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5)) + # Center title and subtitle
+  scale_fill_gradient(low = "#d1e0ff", high = "#561C26") + # Set gradient color
+  theme_minimal() + # Use minimal theme
+  geom_text(aes(label = round(Importance, 2)), nudge_y = 0.04 * max(var_importance$Importance), color = "#340d14",size=2.5)+
+  plotTheme
+
+```
+
+Based on the variable importance results from the Random Forest model, we can draw the following insights:
+
+1.  walk_to_work (walking to work) is the most important predictor with an importance of 0.87. This suggests a strong association between the proportion of people walking to work and bicycle accidents. A possible explanation is that walking and cycling share similarities as modes of transportation, and more walkers might imply more cyclists, thus influencing bicycle accident occurrences.
+
+2.  Percent_Taking_car_Trans (percentage of car commuters) has an importance of 0.52, indicating a relatively high correlation. This may suggest that areas with a higher percentage of car commuters could have negative impacts on bicycle safety, possibly due to increased traffic congestion and a higher risk of accidents from more car commuters.
+
+3.  Other variables with higher importance include Percent_Minor (percentage of minors, 0.42), signal_count (number of traffic signals, 0.38), Travel_Time (travel time, 0.36), and speed (speed, 0.36). These variables could have direct or indirect influences on bicycle accident occurrences.
+
+4.  Some variables have lower importance, such as park_lane_width (parking lane width, 0.10), has_bike_lanes (presence of bike lanes, 0.11), and total_park_lanes (total number of parking lanes, 0.11). These variables play a relatively smaller role in predicting bicycle accidents but might still affect bicycle safety to some extent.
+
+Overall, these variable importance results reveal the influence of various socioeconomic, transportation, and infrastructure factors on bicycle accidents in Washington D.C. By considering these factors, we can better understand the causes of bicycle accidents and provide insights for policymakers on how to improve cycling safety.
+
+### 4.3 Calculation of evaluation indicators MAE,RMSE,R-squared
+
+This section presents the performance of the random forest regression model in predicting bicycle accidents. We used three evaluation metrics: mean absolute error (MAE), root mean square error (RMSE), and R-squared to assess the accuracy of the model. These metrics help us understand the performance of the model in predicting bicycle accidents and evaluate its effectiveness.
+
+The results show that the random forest regression model has a certain degree of accuracy in predicting bicycle accidents in Washington DC. The MAE is 0.6, indicating an average absolute difference of 0.6 between predicted and actual values. The relatively small MAE value suggests that the model has high predictive accuracy.
+
+RMSE measures the square root of the mean of the squared differences between the observed values and predicted values. RMSE is more sensitive to large errors than MAE, making it more effective in excluding the influence of noise data. In this case, a small RMSE value also indicates that the model has high accuracy.
+
+The R-squared value is around 0.56, indicating that the model explains the variation in bicycle accidents. The closer the R-squared value is to 1, the higher the degree of fitting of the model. In this study, the R-squared value indicates that the model has a certain explanatory power for bicycle accidents prediction, but there is still room for improvement.
+
+```{r message=FALSE,warning=FALSE}
+
+# Predict on the test set
+predictions <- predict(reg, newdata = test_data)
+
+# Calculate evaluation metrics
+MAE <- mean(abs(predictions - test_data$crash_count))
+MSE <- mean((predictions - test_data$crash_count)^2)
+RMSE <- sqrt(MSE)
+rsq <- cor(test_data$crash_count, predictions)^2
+
+# Convert numerical values to strings with 3 decimal places
+MAE_str <- format(MAE, digits = 3)
+RMSE_str <- format(RMSE, digits = 4)
+rsq_str <- format(rsq, digits = 3)
+
+# Create the table with the formatted values
+Model <- c("Random Forest")
+summaryTable1 <- cbind(Model, MAE_str, RMSE_str, rsq_str)
+
+kable(summaryTable1, 
+      col.names = c("Model", "MAE", "RMSE", "R-squared"), # Column names
+      caption = "Prediction of the Random Forest Regression", 
+      escape = FALSE, 
+      align = "c") %>% # Set column alignment to center
+  kable_styling("striped", full_width = F) %>%
+  row_spec(1, color = "#340d14", background = "#f6f4f1")
+
+```
+
+```{r include=FALSE, message=FALSE,warning=FALSE}
+# Add predictions to test_data
+test_data$predictions <- predictions
+
+# Calculate absolute errors
+test_data$abs_error <- abs(test_data$predictions - test_data$crash_count)
+
+```
+
+### 4.4 K-fold Cross-validation
+
+In this section, we performed K-fold cross-validation to evaluate the performance of the random forest regression model on different subsets of data. By dividing the data into 25 subsets, this method helps to evaluate the model's generalization ability on different data subsets. By evaluating each subset, we can observe the performance differences of the model between each subset, and thereby understand the stability and reliability of the model.
+
+```{r message=FALSE,warning=FALSE}
+
+train_control <- trainControl(method = "cv",
+                              number = 25,
+                              savePredictions = "final",
+                              classProbs = TRUE,
+                              summaryFunction = defaultSummary)
+
+# Prepare data
+fishnet_full_df <- as.data.frame(fishnet_full_df) %>%
+  dplyr::select(crash_count, Med_Inc, Travel_Time, Means_of_Transport, Total_Public_Trans, Med_Age, edu_bac, walk_to_work, Percent_White, Mean_Commute_Time, Percent_Taking_Public_Trans, Percent_Female, Percent_Minor, Percent_edu, Percent_Taking_car_Trans, has_bike_lanes, signal_count, total_travel_lanes, total_park_lanes, speed, travel_lane_width, cross_width, park_lane_width)
+
+# Train the model
+model_cv <- train(crash_count ~ .,
+                  data = fishnet_full_df,
+                  method = "rf",
+                  trControl = train_control)
+
+# Print model performance
+print(model_cv)
+
+```
+
+After that, we plotted bar graphs for RMSE, R-squared, and MAE separately. These graphs show the results of each evaluation metric on the 25 different subsets. This helps us to understand the performance of the model on different subsets and estimate its prediction ability on new data. Additionally, these graphs also display the average value of each performance metric, allowing us to have a better understanding of the overall performance of the model.
+
+```{r message=FALSE,warning=FALSE}
+
+metrics_df <- model_cv$resample
+
+plot_metric <- function(metric_name, df) {
+  metric_data <- df[[metric_name]]
+  mean_value <- mean(metric_data)
+  
+  ggplot(df, aes(x = factor(1:length(metric_data)), y = metric_data, fill = metric_data)) +
+    geom_bar(stat = "identity") +
+    theme_minimal() +
+    labs(title = paste0(metric_name, " for Each Fold"),
+         subtitle = paste0("Mean ", metric_name, ": ", round(mean_value, 3)),
+         x = "Fold",
+         y = metric_name) +
+    geom_hline(yintercept = mean_value,color="#ffbc42", linetype = 3, size=1.5) +
+    scale_fill_gradient(low = "#d1e0ff", high = "#561C26") +
+    geom_text(aes(label = round(metric_data, 3)), vjust = -0.5, size = 3, color = "#340d14")+
+    plotTheme
+}
+
+plot_rmse <- plot_metric("RMSE", metrics_df)
+plot_rsquared <- plot_metric("Rsquared", metrics_df)
+plot_mae <- plot_metric("MAE", metrics_df)
+
+plot_rmse
+plot_rsquared
+plot_mae
+```
+
+### 4.5 Spatial Cross-validation
+
+Spatial validation is based on the previous k-fold cross validation by adding the geographic characteristics of the cell, taking the neighborhood where the observation point is located as the unit of calculation, and using the spatial characteristics as an important basis for validating the model, so that the results are more consistent with events with obvious geographic location and prominent spatial characteristics. The prediction of the bicycle crashes is precisely a geographic prediction event, so we choose to use spatial validation in the calculation.
+
+In predicting bicycle accidents, spatial prediction is crucial due to the nature of the event being a geospatial event. Therefore, we chose to use spatial validation in our calculations. We first defined the variables to be included in the prediction, and then executed a spatial cross-validation function on the dataset. Through this method, we can obtain more information about the model's performance on different spatial subsets and improve our confidence in the model's spatial generalization ability. This helps ensure that our model has good predictive capabilities for new data, thereby improving and optimizing the prediction of bicycle accidents.
+
+```{r message=FALSE,warning=FALSE}
+
+crossValidate <- function(dataset, id, dependentVariable, indVariables) {
+  
+  allPredictions <- data.frame()
+  cvID_list <- unique(dataset[[as.character(id)]])
+  
+  for (i in cvID_list) {
+    
+    thisFold <- i
+    
+    fold.train <- dataset[dataset[[as.character(id)]] != thisFold, ] %>% as.data.frame() %>% 
+      dplyr::select(id, geometry, indVariables, dependentVariable)
+    fold.test  <- dataset[dataset[[as.character(id)]] == thisFold, ] %>% as.data.frame() %>% 
+      dplyr::select(id, geometry, indVariables, dependentVariable)
+    
+    reg <- randomForest(as.formula(paste0(dependentVariable, " ~ ", paste(indVariables, collapse = " + "))),
+                        data = fold.train %>% 
+                          dplyr::select(-geometry, -id),
+                        importance = TRUE)
+    
+    thisPrediction <- 
+      mutate(fold.test, Prediction = predict(reg, fold.test %>% 
+                                               dplyr::select(-geometry, -id)))
+    
+    allPredictions <-
+      rbind(allPredictions, thisPrediction)
+    
+  }
+  return(st_sf(allPredictions))
+}
+```
+
+```{r message=FALSE,warning=FALSE}
+
+indVariables <- c("Med_Inc", "Travel_Time", "Means_of_Transport", "Total_Public_Trans", "Med_Age", "edu_bac", "walk_to_work", "Percent_White", "Mean_Commute_Time", "Percent_Taking_Public_Trans", "Percent_Female", "Percent_Minor", "Percent_edu", "Percent_Taking_car_Trans", "has_bike_lanes", "signal_count", "total_travel_lanes", "total_park_lanes",  "travel_lane_width", "speed", "cross_width", "park_lane_width")
+fishnet_full <- fishnet_full %>%
+  mutate(cvID = sample(1:25, size = nrow(fishnet_full), replace = TRUE))
+
+spatial_cv_results <- crossValidate(dataset = fishnet_full,
+                                    id = "cvID",
+                                    dependentVariable = "crash_count",
+                                    indVariables = indVariables)
+
+```
+
+#### 4.5.1 Visualization of Spatial Cross-validation Results
+
+In this code section, we visualize the results of spatial cross-validation to better understand the distribution of predicted bicycle crashes in Washington D.C. First, we extract relevant information from the spatial cross-validation results and round the predicted values to the nearest integer. Then, we create a choropleth map using ggplot() to represent the predicted bicycle crash counts with a continuous color scale. Finally, we convert the static map into an interactive map for users to explore the predicted results in different areas more conveniently.
+
+Through this interactive map, we can better showcase the spatial distribution of predicted results in the project and identify high-risk areas. This can help to identify the factors related to bicycle crashes and improve the safety of city bike lanes, ultimately reducing the incidence of bicycle accidents. Additionally, the interactive map visualization can further validate the accuracy and generalizability of the model predictions, making the entire research project more convincing and applicable.
+
+```{r message=FALSE,warning=FALSE}
+
+spatialcv <-
+  spatial_cv_results %>%
+  dplyr::select("cvID" = cvID, crash_count, Prediction, geometry)
+
+spatialcv <- spatialcv %>%
+  mutate(Rounded_Prediction = round(Prediction))
+
+spatialcv_continuous_plot <- ggplot() +
+  geom_sf(data = spatialcv, aes(fill = Prediction), color = "transparent") +
+  scale_fill_gradient(low = "#d1e0ff", high = "#561C26") +
+  labs(title = "Predicted Numbers of Bicycle Crashes") +
+  mapTheme
+
+interactive_spatialcv_continuous_plot <- ggplotly(spatialcv_continuous_plot)
+
+interactive_spatialcv_continuous_plot
+
+```
+
+#### 4.5.2 Predicted Risk Scores of Spatial Cross-validation
+
+By grouping the predicted results into low, medium, and high-risk categories, we created a map to display the bicycle accident risk in each grid of Washington D.C. The color code indicates the predicted risk level, where yellow represents low-risk, orange represents medium-risk, and red represents high-risk. This visualization method helps to understand the spatial distribution of bicycle accidents and take targeted measures to improve road safety.
+
+```{r message=FALSE,warning=FALSE}
+
+spatialcv_grouped <- spatialcv %>%
+  mutate(Prediction_Group = cut(Prediction, breaks = c(-Inf, quantile(Prediction, probs = 1/3), quantile(Prediction, probs = 2/3), Inf), labels = c("Low", "Medium", "High")))
+
+spatialcv_plot <- ggplot() +
+  geom_sf(data = spatialcv_grouped, aes(fill = Prediction_Group), color = "transparent") +
+  scale_fill_manual(values = c("Low" = "#fdca40", "Medium" = "#e85d04", "High" = "#6a040f"), name = "Prediction Group") +
+  labs(title = "Predicted Risk Scores",
+       subtitle = "Grouped into Low, Medium, and High") +
+  mapTheme
+
+interactive_spatialcv_plot <- ggplotly(spatialcv_plot)
+
+interactive_spatialcv_plot
+
+```
+
+## 5. Final Results
+
+```{r message=FALSE,warning=FALSE, include=FALSE}
+
+fishnet_full <- fishnet_full %>%
+  mutate(Nums = predict(reg, fishnet_full, type= "response"))
+
+```
+
+### 5.1 Pie Chart of Prediction Error
+
+In this section, we compared the difference between the predicted number of bicycle accidents (Nums) and the actual number of bicycle accidents (Crash Count). We rounded the differences to the nearest integer and calculated the frequency of each difference category.
+
+Then, we used a pie chart to visualize these differences and show the distribution of differences between predicted and actual values. To make the pie chart more appealing, we used a custom color scheme. On the pie chart, we displayed labels and percentages for each difference category to provide a more intuitive understanding of the accuracy of the predicted results.
+
+```{r message=FALSE,warning=FALSE}
+fishnet_full <- fishnet_full %>%
+  mutate(ANums = round(Nums),  
+         diff = abs(ANums - crash_count)) 
+diff_counts <- fishnet_full %>%
+  count(diff)
+diff_counts <- diff_counts %>%
+  mutate(diff_category = ifelse(diff > 5, "Greater than 5", as.character(diff)))%>%
+  st_drop_geometry()
+
+custom_colors <- c("#588B8B", "#829E99", "#ACB0A7", "#FFD5C2", "#EEA47F", "#DD723C", "#C8553D")
+
+plot_ly(data = diff_counts, labels = ~diff_category, values = ~n, type = 'pie', 
+        textinfo = 'label+percent', insidetextorientation = 'radial',
+        marker = list(colors = custom_colors)) %>%
+  layout(title = "Distribution of Differences between Nums and Crash Count",
+         showlegend = TRUE)
+
+```
+
+### 5.2 Classification of Crash Count and Nums
+
+In this section, we compared the actual number of bicycle accidents (Crash Count) with the predicted number of bicycle accidents (Nums) and classified them into four categories:
+
+1.  Crash Count is 0 and Nums is 0
+2.  Crash Count is 0 and Nums is not 0
+3.  Crash Count is not 0 and Nums is not 0
+4.  Crash Count is not 0 and Nums is 0
+
+Then, we visualized these categories on a map to gain a more intuitive understanding of the relationship between the actual and predicted values. We used different colors to represent different categories, making the map easier to read. Through this visualization method, we can intuitively understand the areas where the model predicts correctly and the areas where there may be deviations.
+
+```{r message=FALSE,warning=FALSE}
+fishnet_full <- fishnet_full %>%
+  mutate(Category = case_when(
+    crash_count == 0 & ANums == 0 ~ "Crash Count 0, Nums 0",
+    crash_count == 0 & ANums != 0 ~ "Crash Count 0, Nums not 0",
+    crash_count != 0 & ANums != 0 ~ "Crash Count not 0, Nums not 0",
+    crash_count != 0 & ANums == 0 ~ "Crash Count not 0, Nums 0"
+  ))
+
+Category_plot<-ggplot(data = fishnet_full) +
+  geom_sf(aes(fill = Category), color = "transparent") +
+  scale_fill_manual(values = c("Crash Count 0, Nums 0" = "#754D5D",
+                               "Crash Count 0, Nums not 0" = "#4281a4",
+                               "Crash Count not 0, Nums not 0" = "#ce6a85",
+                               "Crash Count not 0, Nums 0" = "#D1E0FF"),
+                    name = "Category") +
+  labs(title = "Classification of Crash Count and Nums") +
+  mapTheme
+
+interactive_Category_plot <- ggplotly(Category_plot)
+
+interactive_Category_plot
+
+```
+
+```{r message=FALSE,warning=FALSE}
+
+fishnet_full <- fishnet_full %>%
+  mutate(Prediction_Group = cut(Nums, breaks = c(-Inf, quantile(Nums, probs = 1/3), quantile(Nums, probs = 2/3), Inf), labels = c("Low", "Medium", "High")))
+
+spatialcv_plot <- ggplot() +
+  geom_sf(data = fishnet_full, aes(fill = Prediction_Group), color = "transparent") +
+  scale_fill_manual(values = c("Low" = "#fdca40", "Medium" = "#e85d04", "High" = "#6a040f"), name = "Prediction Group") +
+  labs(title = "Predicted Risk Scores",
+       subtitle = "Grouped into Low, Medium, and High") +
+  mapTheme
+
+interactive_spatialcv_plot <- ggplotly(spatialcv_plot)
+
+interactive_spatialcv_plot
+
+```
+
+```{r}
+geojsonio::geojson_write(fishnet_full, file = "fishnet_full.geojson")
+```
+
+## 6. Conclusion
+
+Our research aims to explore the severity and impact of bicycle crashes in Washington DC by utilizing machine learning methods to investigate multiple demographic, transportation, and environmental variables. Through this research, we have developed an effective predictive model that allows us to more accurately assess the risk of bicycle crashes in different areas of Washington DC and aid in the development of more targeted and effective traffic safety policies.
+
+In terms of mathematical modeling, we used the random forest algorithm for model training and utilized cross-validation and spatial cross-validation to evaluate model performance and accuracy. Our model performed well in predicting the number of bicycle crashes, demonstrating high predictive accuracy and robustness. Additionally, our model considered spatial variables, allowing for a more precise prediction of bicycle crash risk in different areas.
+
+However, our research also has some limitations. First, due to data collection and processing constraints, our model only considered a limited number of variables and may not encompass all factors that affect bicycle crashes. Second, our study only focused on bicycle crash risk in Washington DC and may not be applicable to other cities or regions. Finally, our model can only predict future bicycle crash risk and may not provide effective solutions for bicycle crashes that have already occurred.
+
+In conclusion, our research provides a new method for assessing bicycle crash risk in Washington DC, which has important practical significance. Although there is still room for improvement in our research, it provides useful guidance and inspiration for us to better understand and predict bicycle crash risk.
